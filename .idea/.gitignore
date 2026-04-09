@@ -1,0 +1,20 @@
+# 默认忽略的文件
+/shelf/
+/workspace.xml
+# 基于编辑器的 HTTP 客户端请求
+/httpRequests/
+# Datasource local storage ignored files
+/dataSources/
+/dataSources.local.xml
+__pycache__/
+*.py[cod]
+.idea/
+.vscode/
+.env
+# 忽略所有的密钥和证书文件
+certs/*.pem
+*.ply
+*.pth
+data/
+outputs/
+uploads/
