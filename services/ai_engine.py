@@ -47,14 +47,14 @@ class PointCloudAIEngine:
                 self.pipelines['indoor'] = ml3d.pipelines.SemanticSegmentation(
                     model=ml3d.models.RandLANet(**cfg_in.model), dataset=ml3d.datasets.S3DIS(**cfg_in.dataset), device=self.device, **cfg_in.pipeline)
                 self.pipelines['indoor'].load_ckpt(ckpt_path=indoor_ckpt)
-                print("✅ 室内模型 (Indoor) 加载成功")
+                print("室内模型 (Indoor) 加载成功")
 
             if os.path.exists(outdoor_yaml) and os.path.exists(outdoor_ckpt):
                 cfg_out = _ml3d.utils.Config.load_from_file(outdoor_yaml)
                 self.pipelines['outdoor'] = ml3d.pipelines.SemanticSegmentation(
                     model=ml3d.models.RandLANet(**cfg_out.model), dataset=ml3d.datasets.SemanticKITTI(**cfg_out.dataset), device=self.device, **cfg_out.pipeline)
                 self.pipelines['outdoor'].load_ckpt(ckpt_path=outdoor_ckpt)
-                print("✅ 室外模型 (Outdoor) 加载成功")
+                print("室外模型 (Outdoor) 加载成功")
 
             self.is_loaded = True
             print("🎉 AI Engine Pro 双引擎初始化完成.")
@@ -69,7 +69,7 @@ class PointCloudAIEngine:
             print(f"📂 正在读取文件: {input_path}")
             
             if input_path.lower().endswith('.bin'):
-                # 🚀 依然支持 KITTI .bin，但只取 XYZ，抛弃反射率
+                #  依然支持 KITTI .bin，但只取 XYZ，抛弃反射率
                 scan = np.fromfile(input_path, dtype=np.float32).reshape(-1, 4)
                 points = scan[:, 0:3]
                 colors = np.ones_like(points) * 0.5 # 占位颜色
@@ -98,7 +98,6 @@ class PointCloudAIEngine:
                 max_span = max(x_span, y_span)
 
                 if max_span > 1000.0:
-                    print(f"📏 [数据清洗] 检测到极大跨度({max_span:.1f})，推测单位为毫米，自动换算为米...")
                     points = points / 1000.0
                     x_span, y_span, z_span = x_span / 1000.0, y_span / 1000.0, z_span / 1000.0
                     max_span = max(x_span, y_span)
@@ -109,8 +108,6 @@ class PointCloudAIEngine:
                     scene_type = "outdoor"
                 else:
                     scene_type = "indoor"
-
-                print(f"🤖 [Auto-Detect] 修正后物理跨度: XY面 {max_span:.1f}米, 高度Z {z_span:.1f}米 -> 判定为: 【{scene_type.upper()}】")
 
             pipeline = self.pipelines.get(scene_type)
             colors_palette = self.color_maps[scene_type]
@@ -127,17 +124,17 @@ class PointCloudAIEngine:
 
             # === 3. 智能防御性降采样 ===
             if total_points > 200000:
-                print(f"🛡️ 启动降采样防御 (体素 {voxel_size}m)...")
+                print(f"启动降采样防御 (体素 {voxel_size}m)...")
                 temp_pcd = o3d.geometry.PointCloud()
                 temp_pcd.points = o3d.utility.Vector3dVector(points)
+                temp_pcd, _ = temp_pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
                 pcd_down = temp_pcd.voxel_down_sample(voxel_size=voxel_size)
                 p_down = np.asarray(pcd_down.points)
                 c_down = np.asarray(pcd_down.colors) if pcd_down.has_colors() else np.ones_like(p_down) * 0.5
                 total_down = len(p_down)
-                print(f"✅ 降采样完成！处理点数从 {total_points} 降至 {total_down}")
             else:
-                print(f"⚡ 数据量安全 ({total_points}点)，跳过降采样，全量推理！")
-                p_down, c_down = points, colors
+                p_down = points
+                c_down = colors
                 total_down = total_points
 
             down_vote_counter = np.zeros((total_down, len(colors_palette)), dtype=np.uint16)
@@ -150,8 +147,6 @@ class PointCloudAIEngine:
 
             x_grids = np.arange(min_b[0], max_b[0], step_size)
             y_grids = np.arange(min_b[1], max_b[1], step_size)
-            
-            print(f"🧩 划分为 {len(x_grids) * len(y_grids)} 个区块进行推理...")
             for x in x_grids:
                 for y in y_grids:
                     idx_in_block = np.where(
@@ -183,7 +178,7 @@ class PointCloudAIEngine:
             pcd_down_labels = np.argmax(down_vote_counter, axis=1)
             
             if total_points > 200000:
-                print(f"📊 正在将推理结果无损还原给 {total_points} 个原始点...")
+                print(f" 正在将推理结果无损还原给 {total_points} 个原始点...")
                 kdtree = o3d.geometry.KDTreeFlann(pcd_down)
                 BATCH = 2000000
                 for i in range(0, total_points, BATCH):
@@ -192,7 +187,7 @@ class PointCloudAIEngine:
                         _, idx, _ = kdtree.search_knn_vector_3d(points[j], 1)
                         final_predictions[j] = pcd_down_labels[idx[0]]
             else:
-                print(f"📊 小点云直接映射标签，完成！")
+                print(f"小点云直接映射标签，完成！")
                 final_predictions = pcd_down_labels
 
             # === 6. 保存与计算指标 ===

@@ -18,3 +18,5 @@ certs/*.pem
 data/
 outputs/
 uploads/
+*.__pycache__
+*.pyc

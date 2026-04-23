@@ -1,33 +1,29 @@
-from sqlmodel import Session, select  # 💡 引入 SQLModel 的核心组件
+from sqlmodel import Session, func, select  # 💡 引入 SQLModel 的核心组件
 from models import ProcessingHistory   # 💡 确保引入的是 SQLModel 版本的模型
 from datetime import datetime
 
-def get_user_history(db: Session, user_id: int):
+def get_user_history(db: Session, user_id: int, page: int = 1, size: int = 10):
     """
-    根据 user_id 查询历史记录，按创建时间倒序排列
+    根据 user_id 查询历史记录，支持分页，按创建时间倒序排列
     """
-    # 💡 变化：SQLModel 推荐使用 select() 语法，更接近原生 SQL 逻辑
+    # 1. 先统计该用户一共有多少条历史记录
+    count_statement = select(func.count(ProcessingHistory.id)).where(ProcessingHistory.user_id == user_id)
+    total = db.exec(count_statement).one()
+
+    # 2. 计算分页偏移量 (Skip)
+    skip = (page - 1) * size
+
+    # 3. 执行分页查询：加上 .offset() 和 .limit()
     statement = select(ProcessingHistory)\
                 .where(ProcessingHistory.user_id == user_id)\
-                .order_by(ProcessingHistory.created_at.desc())
+                .order_by(ProcessingHistory.created_at.desc())\
+                .offset(skip)\
+                .limit(size)
     
-    return db.exec(statement).all()  # 注意：db.query().all() 变成了 db.exec().all()
-
-def update_history_remark(db: Session, history_id: int, user_id: int, new_remark: str):
-    """修改备注（带权限校验）"""
-    # 💡 同时也演示一下多条件的 select 语法
-    statement = select(ProcessingHistory).where(
-        ProcessingHistory.id == history_id, 
-        ProcessingHistory.user_id == user_id
-    )
-    record = db.exec(statement).first()
+    records = db.exec(statement).all()
     
-    if record:
-        record.remark = new_remark
-        db.add(record)  # 显式告知会话对象已变更
-        db.commit()
-        db.refresh(record)
-    return record
+    # 将总数和分页后的数据一起返回
+    return total, records
 
 def delete_user_history(db: Session, history_id: int, user_id: int):
     """删除记录（带权限校验）"""

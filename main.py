@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from database import engine
 import models
-from routers import auth, task, history
+from routers import  auth, dataset, task, history
 from routers import payment
 
 # 引入路由模块
@@ -60,6 +60,7 @@ app.include_router(auth.router)
 app.include_router(task.router)
 app.include_router(history.router)
 app.include_router(payment.router)
+app.include_router(dataset.router)
 # 挂载静态文件，让前端能下载处理好的模型
 app.mount("/api/models", StaticFiles(directory="data/outputs"), name="models")
 

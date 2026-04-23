@@ -111,3 +111,11 @@ class ResetPasswordRequest(SQLModel):
     new_password: str
 class SendCodeRequest(SQLModel):
     email: str
+class PointData(SQLModel):
+    cloud_name: str
+    scene_type: str
+    points_data: list # 接收 [[x,y,z,label], ...]
+
+class SaveDatasetRequest(SQLModel):
+    task_id: str
+    data: List[PointData]

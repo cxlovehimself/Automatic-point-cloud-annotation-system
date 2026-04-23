@@ -28,6 +28,7 @@ def login(user: UserLogin, db: Session = Depends(get_db)): # 💡 修改 4：类
     # 1. 呼叫 Service 查询用户
     db_user = crud_user.get_user_by_email(db, email=user.email)
     expire_str = db_user.vip_expire_time.strftime("%Y-%m-%d") if db_user.vip_expire_time else None
+    register_str = db_user.register_time.isoformat() if db_user.register_time else None
     
     # 2. 校验密码
     if not db_user or not security.verify_password(user.password, db_user.password_hash):
@@ -50,7 +51,9 @@ def login(user: UserLogin, db: Session = Depends(get_db)): # 💡 修改 4：类
             "role": db_user.role,
             "is_subscribed": db_user.is_subscribed,
             # 💡 附加升级：如果你之前在 User 模型里加了 vip_expire_time，这里顺手返回去，前端会感激涕零！
-            "vip_expire_time": expire_str
+            "vip_expire_time": expire_str,
+            "register_time": register_str
+            
         }
     )
 # router.py
@@ -66,6 +69,7 @@ def get_current_user_info(
     # 直接调用你刚才确认过的 Service 方法
     db_user = crud_user.get_user_by_email(db, email=current_user_email)
     expire_str = db_user.vip_expire_time.strftime("%Y-%m-%d") if db_user.vip_expire_time else None
+    register_str = db_user.register_time.isoformat() if db_user.register_time else None
     
     if not db_user:
         raise HTTPException(status_code=404, detail="用户不存在")
@@ -77,7 +81,8 @@ def get_current_user_info(
             "email": db_user.email,
             "role": db_user.role,
             "is_subscribed": db_user.is_subscribed,
-            "vip_expire_time": expire_str
+            "vip_expire_time": expire_str,
+            "register_time": register_str
         }
     )
 @router.post("/change-password")
@@ -86,22 +91,20 @@ def change_password(
     db: Session = Depends(get_db),
     current_user_email: str = Depends(security.get_current_user_email)
 ):
-    # 1. 呼叫 Service 查人
+   
     db_user = crud_user.get_user_by_email(db, email=current_user_email)
     if not db_user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    # 2. Router 层负责 HTTP 级别的逻辑拦截
     if not security.verify_password(req.old_password, db_user.password_hash):
         raise HTTPException(status_code=400, detail="原密码错误")
 
     if req.old_password == req.new_password:
         raise HTTPException(status_code=400, detail="新密码不能与原密码相同")
 
-    # 3. 核心精简：直接呼叫 Service 替我们完成更新！
+    
     crud_user.update_password(db, db_user=db_user, new_password=req.new_password)
 
-    # 4. 返回成功
     return success_response(message="密码修改成功，请重新登录")
 @router.post("/send-reset-code")
 def send_reset_code(req: SendCodeRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
