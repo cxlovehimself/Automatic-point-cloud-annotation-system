@@ -12,6 +12,14 @@ router = APIRouter(prefix="/api/task", tags=["点云处理模块"])
 UPLOAD_DIR = "data/uploads"
 OUTPUT_DIR = "data/outputs"
 
+
+def _task_id_for_user(user_id: int) -> str:
+    return f"user-{user_id}-{uuid.uuid4().hex}"
+
+
+def _user_task_prefix(user_id: int) -> str:
+    return f"user-{user_id}-"
+
 @router.post("/predict")
 async def predict_pointcloud(
     request: Request, 
@@ -68,13 +76,16 @@ async def predict_pointcloud(
     # ==========================================
     # 💡 核心变身：不自己跑 AI 了，扔给后厨 (Celery) 去跑！
     # ==========================================
-    task = run_ai_segmentation_task.delay(
-        input_path=input_path,
-        output_path=output_path,
-        scene_type=scene_type,
-        user_id=current_user.id,
-        safe_filename=safe_filename,
-        result_url=result_url
+    task = run_ai_segmentation_task.apply_async(
+        task_id=_task_id_for_user(current_user.id),
+        kwargs={
+            "input_path": input_path,
+            "output_path": output_path,
+            "scene_type": scene_type,
+            "user_id": current_user.id,
+            "safe_filename": safe_filename,
+            "result_url": result_url,
+        }
     )
 
     # 瞬间返回！发号码牌
@@ -89,7 +100,10 @@ async def predict_pointcloud(
 
 # 🎯 接口 2：大堂叫号屏 (前端一直来问进度)
 @router.get("/status/{task_id}")
-def get_task_status(task_id: str):
+def get_task_status(task_id: str, current_user = Depends(get_current_user)):
+    if not task_id.startswith(_user_task_prefix(current_user.id)):
+        raise HTTPException(status_code=403, detail="无权查看该任务状态")
+
     task_result = AsyncResult(task_id, app=celery_app)
     
     if task_result.state == 'PENDING':
