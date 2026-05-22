@@ -5,6 +5,8 @@ from models import Order, User
 import uuid 
 import time
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
+from typing import Optional, Tuple
 
 import os
 from dotenv import load_dotenv
@@ -61,24 +63,25 @@ def create_payment_order(db: Session, user_id: int, amount: str = "9.90", base_u
     db.add(new_order)
     db.commit()
     db.refresh(new_order)
+    notify_url = f"{base_url.rstrip('/')}/api/payment/callback" if base_url else (NOTIFY_URL or "").strip()
     order_string = alipay.api_alipay_trade_page_pay(
         out_trade_no=out_trade_no,
         total_amount=amount,
         subject="PointCloud Annotator Pro 包月会员",
         return_url=RETURN_URL, 
         # 💡 2. 替换掉死板的 NOTIFY_URL，用我们刚刚动态生成的！
-        notify_url=NOTIFY_URL
+        notify_url=notify_url
     )
     payurl = f"https://openapi-sandbox.dl.alipaydev.com/gateway.do?{order_string}"
     print(f"💡 生成的支付链接: {payurl}")
     return payurl, out_trade_no
 
 
-def process_callback(db: Session, data: dict) -> bool:
+def process_callback(db: Session, data: dict) -> Tuple[bool, Optional[str]]:
     """处理支付宝回调"""
     signature = data.pop("sign", None)
     if not alipay.verify(data, signature):
-        return False  
+        return False, None
 
     if data.get("trade_status") in ("TRADE_SUCCESS", "TRADE_FINISHED"):
         out_trade_no = data.get("out_trade_no")
@@ -87,12 +90,24 @@ def process_callback(db: Session, data: dict) -> bool:
         # 💡 升级 1：用 SQLModel 语法查询订单
         statement_order = select(Order).where(Order.out_trade_no == out_trade_no)
         order = db.exec(statement_order).first()
-        
-        if order and order.status == "pending":
+
+        if not order:
+            return False, None
+
+        if order.status == "paid":
+            # 支付宝可能重复通知已处理订单；返回 success 停止重试，不重复发邮件。
+            return True, None
+
+        if order.status == "pending":
+            try:
+                paid_amount = Decimal(str(data.get("total_amount", "0")))
+            except (InvalidOperation, ValueError):
+                return False, None
+
             # 金额防篡改校验
-            if float(data.get("total_amount", 0)) != float(order.total_amount):
+            if paid_amount != Decimal(order.total_amount):
                 print(f"⚠️ 严重警告：订单 {out_trade_no} 金额被篡改！")
-                return False 
+                return False, None
 
             # 更新订单状态
             order.status = "paid"
@@ -115,7 +130,9 @@ def process_callback(db: Session, data: dict) -> bool:
                 db.add(user) # 显式加入会话
                 
             db.commit() # 一次性提交订单和用户的修改
-        return True, user.email if user else None
+            return True, user.email if user else None
+
+        return False, None
         
     # 💡 修改这里：失败时，返回 False 和 None
     return False, None
