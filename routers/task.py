@@ -1,4 +1,5 @@
 import os
+import json
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, Request
 from sqlmodel import Session
 import uuid
@@ -11,6 +12,26 @@ router = APIRouter(prefix="/api/task", tags=["点云处理模块"])
 
 UPLOAD_DIR = "data/uploads"
 OUTPUT_DIR = "data/outputs"
+TASK_META_DIR = "data/task_meta"
+
+def _task_meta_path(task_id: str) -> str:
+    try:
+        safe_task_id = uuid.UUID(task_id).hex
+    except ValueError:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return os.path.join(TASK_META_DIR, f"{safe_task_id}.json")
+
+def _save_task_owner(task_id: str, user_id: int):
+    os.makedirs(TASK_META_DIR, exist_ok=True)
+    with open(_task_meta_path(task_id), "w") as f:
+        json.dump({"user_id": user_id}, f)
+
+def _load_task_owner(task_id: str):
+    try:
+        with open(_task_meta_path(task_id), "r") as f:
+            return json.load(f).get("user_id")
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
 
 @router.post("/predict")
 async def predict_pointcloud(
@@ -39,6 +60,8 @@ async def predict_pointcloud(
     # ==========================================
     # 💡 保留你原来完美的文件名防撞逻辑！
     # ==========================================
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="上传文件名不能为空")
     safe_filename = os.path.basename(file.filename)
     time_str = datetime.now().strftime("%Y%m%d_%H%M%S") 
     short_uuid = uuid.uuid4().hex[:8] 
@@ -68,14 +91,25 @@ async def predict_pointcloud(
     # ==========================================
     # 💡 核心变身：不自己跑 AI 了，扔给后厨 (Celery) 去跑！
     # ==========================================
-    task = run_ai_segmentation_task.delay(
-        input_path=input_path,
-        output_path=output_path,
-        scene_type=scene_type,
-        user_id=current_user.id,
-        safe_filename=safe_filename,
-        result_url=result_url
-    )
+    task_id = uuid.uuid4().hex
+    try:
+        _save_task_owner(task_id, current_user.id)
+        task = run_ai_segmentation_task.apply_async(
+            kwargs={
+                "input_path": input_path,
+                "output_path": output_path,
+                "scene_type": scene_type,
+                "user_id": current_user.id,
+                "safe_filename": safe_filename,
+                "result_url": result_url
+            },
+            task_id=task_id
+        )
+    except Exception as e:
+        for path in (input_path, _task_meta_path(task_id)):
+            if os.path.exists(path):
+                os.remove(path)
+        raise HTTPException(status_code=503, detail=f"任务队列暂不可用: {str(e)}")
 
     # 瞬间返回！发号码牌
     return success_response(
@@ -89,7 +123,20 @@ async def predict_pointcloud(
 
 # 🎯 接口 2：大堂叫号屏 (前端一直来问进度)
 @router.get("/status/{task_id}")
-def get_task_status(task_id: str):
+def get_task_status(
+    task_id: str,
+    current_user = Depends(get_current_user)
+):
+    owner_id = _load_task_owner(task_id)
+    if owner_id is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    try:
+        is_owner = int(owner_id) == current_user.id
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if not is_owner:
+        raise HTTPException(status_code=403, detail="无权查看该任务")
+
     task_result = AsyncResult(task_id, app=celery_app)
     
     if task_result.state == 'PENDING':
