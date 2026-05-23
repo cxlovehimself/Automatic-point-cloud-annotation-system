@@ -46,6 +46,13 @@ alipay = AliPay(
     debug=True  
 )
 
+
+def _build_notify_url(base_url: str = "") -> str:
+    if base_url:
+        return f"{base_url.rstrip('/')}/api/payment/callback"
+    return (NOTIFY_URL or "").strip()
+
+
 def create_payment_order(db: Session, user_id: int, amount: str = "9.90", base_url: str = "") -> str:
     # 生成唯一订单号
     random_str = uuid.uuid4().hex[:6] 
@@ -61,13 +68,14 @@ def create_payment_order(db: Session, user_id: int, amount: str = "9.90", base_u
     db.add(new_order)
     db.commit()
     db.refresh(new_order)
+    dynamic_notify_url = _build_notify_url(base_url)
     order_string = alipay.api_alipay_trade_page_pay(
         out_trade_no=out_trade_no,
         total_amount=amount,
         subject="PointCloud Annotator Pro 包月会员",
         return_url=RETURN_URL, 
         # 💡 2. 替换掉死板的 NOTIFY_URL，用我们刚刚动态生成的！
-        notify_url=NOTIFY_URL
+        notify_url=dynamic_notify_url
     )
     payurl = f"https://openapi-sandbox.dl.alipaydev.com/gateway.do?{order_string}"
     print(f"💡 生成的支付链接: {payurl}")
