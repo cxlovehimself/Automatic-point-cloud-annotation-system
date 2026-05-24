@@ -12,6 +12,12 @@ router = APIRouter(prefix="/api/task", tags=["点云处理模块"])
 UPLOAD_DIR = "data/uploads"
 OUTPUT_DIR = "data/outputs"
 
+def _task_id_for_user(user_id: int) -> str:
+    return f"user-{user_id}-{uuid.uuid4().hex}"
+
+def _task_belongs_to_user(task_id: str, user_id: int) -> bool:
+    return task_id.startswith(f"user-{user_id}-")
+
 @router.post("/predict")
 async def predict_pointcloud(
     request: Request, 
@@ -68,14 +74,23 @@ async def predict_pointcloud(
     # ==========================================
     # 💡 核心变身：不自己跑 AI 了，扔给后厨 (Celery) 去跑！
     # ==========================================
-    task = run_ai_segmentation_task.delay(
-        input_path=input_path,
-        output_path=output_path,
-        scene_type=scene_type,
-        user_id=current_user.id,
-        safe_filename=safe_filename,
-        result_url=result_url
-    )
+    celery_task_id = _task_id_for_user(current_user.id)
+    try:
+        task = run_ai_segmentation_task.apply_async(
+            kwargs={
+                "input_path": input_path,
+                "output_path": output_path,
+                "scene_type": scene_type,
+                "user_id": current_user.id,
+                "safe_filename": safe_filename,
+                "result_url": result_url
+            },
+            task_id=celery_task_id
+        )
+    except Exception as e:
+        if os.path.exists(input_path):
+            os.remove(input_path)
+        raise HTTPException(status_code=503, detail=f"任务提交失败: {str(e)}")
 
     # 瞬间返回！发号码牌
     return success_response(
@@ -89,7 +104,10 @@ async def predict_pointcloud(
 
 # 🎯 接口 2：大堂叫号屏 (前端一直来问进度)
 @router.get("/status/{task_id}")
-def get_task_status(task_id: str):
+def get_task_status(task_id: str, current_user = Depends(get_current_user)):
+    if not _task_belongs_to_user(task_id, current_user.id):
+        raise HTTPException(status_code=404, detail="任务不存在")
+
     task_result = AsyncResult(task_id, app=celery_app)
     
     if task_result.state == 'PENDING':
