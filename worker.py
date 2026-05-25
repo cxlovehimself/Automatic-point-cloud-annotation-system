@@ -14,8 +14,9 @@ celery_app = Celery(
 )
 celery_app.conf.update(task_track_started=True)
 
-@celery_app.task(name="run_ai_segmentation")
+@celery_app.task(name="run_ai_segmentation", bind=True)
 def run_ai_segmentation_task(
+    self,
     input_path: str, 
     output_path: str, 
     scene_type: str, 
@@ -26,6 +27,7 @@ def run_ai_segmentation_task(
     start_time = time.time()
     
     try:
+        self.update_state(state="STARTED", meta={"user_id": user_id})
         if not ai_engine.is_loaded:
             ai_engine.initialize(
                 indoor_yaml="./configs/indoor.yml",
@@ -52,6 +54,7 @@ def run_ai_segmentation_task(
         
         # 3. 返回最终结果给 Redis 柜子，前端此时就能取到了！
         return {
+            "user_id": user_id,
             "result_url": result_url,
             "scene_type": actual_scene,
             "total_process_time_sec": total_time,
