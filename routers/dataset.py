@@ -51,7 +51,7 @@ async def save_annotated_dataset(req: SaveDatasetRequest, current_user = Depends
             safe_cloud_name = _safe_name(cloud.cloud_name, "cloud_name")
             label_filename = f"{safe_cloud_name}_labels.txt"
             file_path = _ensure_under_storage(os.path.join(save_dir, label_filename))
-            
+
             with open(file_path, "w", encoding="utf-8") as f:
                 for p in cloud.points_data:
                     if len(p) < 4:
@@ -60,7 +60,7 @@ async def save_annotated_dataset(req: SaveDatasetRequest, current_user = Depends
 
         # 💡 使用统一返回体，优雅到极致！
         return success_response(
-            message="数据集云端保存成功！", 
+            message="数据集云端保存成功！",
             data={"path": save_dir}
         )
 
