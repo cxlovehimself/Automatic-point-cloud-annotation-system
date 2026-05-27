@@ -1,60 +1,71 @@
 # services/email_service.py
+import logging
 import os
 import random
-import time
 import smtplib
-from email.mime.text import MIMEText
+import time
 from email.header import Header
+from email.mime.text import MIMEText
+from email.utils import formataddr
 from typing import Tuple
-from email.utils import formataddr  # 💡 新增这个工具
-from email.mime.text import MIMEText
-from email.header import Header
-# ==========================================
-# 💡 验证码内存缓存 (放进 Service 层保管)
-# ==========================================
+
+logger = logging.getLogger(__name__)
+
+SMTP_HOST = "smtp.qq.com"
+SMTP_PORT = 465
+DEFAULT_FROM_NAME = "CloudLabel Pro"
+
+# 验证码内存缓存 (放在 Service 层)
 OTP_STORE = {}
 
-def send_real_email(receiver_email: str, code: str):
-    """底层服务：负责真正调用 SMTP 发送邮件"""
+
+def send_html_email(receiver_email: str, subject: str, html_body: str) -> bool:
+    """通过 SMTP 发送 HTML 邮件（QQ 邮箱）。"""
     sender = os.getenv("SMTP_SENDER")
     password = os.getenv("SMTP_PASSWORD")
-    smtp_server = 'smtp.qq.com'
 
     if not sender or not password:
-        print("⚠️ 邮件发送失败：没有配置 SMTP_SENDER 或 SMTP_PASSWORD")
+        logger.warning("邮件未发送: 未配置 SMTP_SENDER 或 SMTP_PASSWORD")
         return False
 
+    message = MIMEText(html_body, "html", "utf-8")
+    message["From"] = formataddr((DEFAULT_FROM_NAME, sender))
+    message["To"] = receiver_email
+    message["Subject"] = Header(subject, "utf-8")
+
+    try:
+        server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT)
+        server.login(sender, password)
+        server.sendmail(sender, [receiver_email], message.as_string())
+        server.quit()
+        return True
+    except Exception:
+        logger.exception("SMTP 发送失败, receiver=%s", receiver_email)
+        return False
+
+
+def send_real_email(receiver_email: str, code: str) -> bool:
+    """发送密码重置验证码邮件。"""
     mail_msg = f"""
     <h3>CloudLabel Pro 安全中心</h3>
     <p>您正在尝试修改/重置密码。您的验证码是：<strong style="color: #58a6ff; font-size: 20px;">{code}</strong></p>
     <p>验证码在 5 分钟内有效。如果不是您本人的操作，请忽略此邮件。</p>
     """
-    message = MIMEText(mail_msg, 'html', 'utf-8')
-    message['From'] = formataddr(("CloudLabel Pro", sender))
-    message['To'] = receiver_email # 收件人直接写邮箱字符串就行，千万别用 Header 包裹！
-    message['Subject'] = Header('【验证码】密码重置验证', 'utf-8') # 标题如果有中文，继续保留 Header
+    return send_html_email(receiver_email, "【验证码】密码重置验证", mail_msg)
 
-    try:
-        server = smtplib.SMTP_SSL(smtp_server, 465)
-        server.login(sender, password)
-        server.sendmail(sender, [receiver_email], message.as_string())
-        server.quit()
-        return True
-    except Exception as e:
-        print(f"邮件发送报错: {e}")
-        return False
 
 def generate_and_store_code(email: str) -> str:
-    """业务服务：生成 6 位验证码并存入缓存"""
+    """生成 6 位验证码并存入缓存"""
     code = str(random.randint(100000, 999999))
     OTP_STORE[email] = {
         "code": code,
-        "expire": time.time() + 300 # 300秒有效期
+        "expire": time.time() + 300,
     }
     return code
 
+
 def verify_code(email: str, code: str) -> Tuple[bool, str]:
-    """业务服务：校验验证码是否正确/过期"""
+    """校验验证码是否正确/过期"""
     record = OTP_STORE.get(email)
     if not record:
         return False, "验证码无效或未发送"
@@ -63,6 +74,5 @@ def verify_code(email: str, code: str) -> Tuple[bool, str]:
     if record["code"] != code:
         return False, "验证码错误"
 
-    # 校验通过，销毁验证码
     del OTP_STORE[email]
     return True, "校验通过"

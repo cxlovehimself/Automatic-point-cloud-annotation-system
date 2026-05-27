@@ -1,3 +1,4 @@
+import logging
 import os
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, Request
 from sqlmodel import Session
@@ -7,6 +8,9 @@ from response import success_response, error_response
 from dependencies import get_db, get_current_user
 from worker import run_ai_segmentation_task, celery_app
 from celery.result import AsyncResult
+
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/task", tags=["点云处理模块"])
 
 UPLOAD_DIR = "data/uploads"
@@ -20,9 +24,7 @@ async def predict_pointcloud(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user) 
 ):
-    # ==========================================
-    # 💡 保留你原来牛逼的防白嫖逻辑！
-    # ==========================================
+    # 非会员：注册超过 14 天则禁止处理
     if not current_user.is_subscribed:
         register_date = current_user.register_time 
         if register_date:
@@ -36,9 +38,6 @@ async def predict_pointcloud(
     if scene_type not in ["indoor", "outdoor", "auto"]:
         raise HTTPException(status_code=400, detail="不支持的 scene_type")
 
-    # ==========================================
-    # 💡 保留你原来完美的文件名防撞逻辑！
-    # ==========================================
     safe_filename = os.path.basename(file.filename)
     time_str = datetime.now().strftime("%Y%m%d_%H%M%S") 
     short_uuid = uuid.uuid4().hex[:8] 
@@ -58,16 +57,13 @@ async def predict_pointcloud(
         with open(input_path, "wb") as f:
             f.write(content)
     except Exception as e:
-        print(f"文件保存异常: {e}")
+        logger.exception("文件保存异常")
         raise HTTPException(status_code=500, detail=f"文件保存失败: {str(e)}")
 
     # 提前帮后厨把最终模型要展示的 URL 拼好
     base_url = str(request.base_url).rstrip('/')
     result_url = f"{base_url}/api/models/{output_filename}"
 
-    # ==========================================
-    # 💡 核心变身：不自己跑 AI 了，扔给后厨 (Celery) 去跑！
-    # ==========================================
     task = run_ai_segmentation_task.delay(
         input_path=input_path,
         output_path=output_path,
@@ -77,17 +73,16 @@ async def predict_pointcloud(
         result_url=result_url
     )
 
-    # 瞬间返回！发号码牌
     return success_response(
         message="文件已上传，已成功加入 AI 算力集群排队队列！",
         data={
-            "task_id": task.id,  # 💡 给前端的号码牌
-            "status": "pending"
-        }
+            "task_id": task.id,
+            "status": "pending",
+        },
     )
 
 
-# 🎯 接口 2：大堂叫号屏 (前端一直来问进度)
+# 查询 Celery 任务进度
 @router.get("/status/{task_id}")
 def get_task_status(task_id: str):
     task_result = AsyncResult(task_id, app=celery_app)

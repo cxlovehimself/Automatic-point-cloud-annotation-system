@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+
+# Keys & certs
+certs/*.pem
+
+# Model weights & large artifacts
+*.pth
+*.ply
+
+# Runtime data
+data/
+storage/datasets/
+outputs/
+uploads/

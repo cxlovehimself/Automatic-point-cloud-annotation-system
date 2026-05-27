@@ -1,3 +1,4 @@
+import logging
 import os
 import torch
 import numpy as np
@@ -5,6 +6,9 @@ import open3d as o3d
 import open3d.ml as _ml3d
 import open3d.ml.torch as ml3d
 import time
+
+logger = logging.getLogger(__name__)
+
 
 class PointCloudAIEngine:
     def __init__(self):
@@ -40,24 +44,24 @@ class PointCloudAIEngine:
 
     def initialize(self, indoor_yaml: str, indoor_ckpt: str, outdoor_yaml: str, outdoor_ckpt: str):
         if self.is_loaded: return
-        print(f"🚀 [AI Engine Pro] 开始在 {self.device} 上加载双场景模型...")
+        logger.debug("开始在 %s 上加载双场景模型", self.device)
         try:
             if os.path.exists(indoor_yaml) and os.path.exists(indoor_ckpt):
                 cfg_in = _ml3d.utils.Config.load_from_file(indoor_yaml)
                 self.pipelines['indoor'] = ml3d.pipelines.SemanticSegmentation(
                     model=ml3d.models.RandLANet(**cfg_in.model), dataset=ml3d.datasets.S3DIS(**cfg_in.dataset), device=self.device, **cfg_in.pipeline)
                 self.pipelines['indoor'].load_ckpt(ckpt_path=indoor_ckpt)
-                print("室内模型 (Indoor) 加载成功")
+                logger.debug("室内模型 (Indoor) 加载成功")
 
             if os.path.exists(outdoor_yaml) and os.path.exists(outdoor_ckpt):
                 cfg_out = _ml3d.utils.Config.load_from_file(outdoor_yaml)
                 self.pipelines['outdoor'] = ml3d.pipelines.SemanticSegmentation(
                     model=ml3d.models.RandLANet(**cfg_out.model), dataset=ml3d.datasets.SemanticKITTI(**cfg_out.dataset), device=self.device, **cfg_out.pipeline)
                 self.pipelines['outdoor'].load_ckpt(ckpt_path=outdoor_ckpt)
-                print("室外模型 (Outdoor) 加载成功")
+                logger.debug("室外模型 (Outdoor) 加载成功")
 
             self.is_loaded = True
-            print("🎉 AI Engine Pro 双引擎初始化完成.")
+            logger.debug("双引擎初始化完成")
         except Exception as e:
             raise RuntimeError(f"模型初始化失败: {str(e)}")
 
@@ -66,7 +70,7 @@ class PointCloudAIEngine:
 
         try:
             # === 1. 解析点云 ===
-            print(f"📂 正在读取文件: {input_path}")
+            logger.debug("正在读取文件: %s", input_path)
             
             if input_path.lower().endswith('.bin'):
                 #  依然支持 KITTI .bin，但只取 XYZ，抛弃反射率
@@ -124,7 +128,7 @@ class PointCloudAIEngine:
 
             # === 3. 智能防御性降采样 ===
             if total_points > 200000:
-                print(f"启动降采样防御 (体素 {voxel_size}m)...")
+                logger.debug("启动降采样防御 (体素 %sm)", voxel_size)
                 temp_pcd = o3d.geometry.PointCloud()
                 temp_pcd.points = o3d.utility.Vector3dVector(points)
                 temp_pcd, _ = temp_pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
@@ -156,9 +160,7 @@ class PointCloudAIEngine:
                     if len(idx_in_block) < 10: continue
                         
                     p_block, c_block = p_down[idx_in_block], c_down[idx_in_block]
-                    # 💡 核心改动：
-                    # 室内模型 (in_channels=6) 需要吃 RGB 颜色，所以传入 c_block
-                    # 室外模型 (in_channels=3) 只吃纯几何坐标 XYZ，所以特征必须是 None！
+                    # 室内模型 (in_channels=6) 需要 RGB，传入 c_block；室外模型只吃 XYZ，特征为 None
                     if scene_type == "outdoor":
                         f_block = None
                     else:
@@ -178,7 +180,7 @@ class PointCloudAIEngine:
             pcd_down_labels = np.argmax(down_vote_counter, axis=1)
             
             if total_points > 200000:
-                print(f" 正在将推理结果无损还原给 {total_points} 个原始点...")
+                logger.debug("正在将推理结果映射回 %s 个原始点", total_points)
                 kdtree = o3d.geometry.KDTreeFlann(pcd_down)
                 BATCH = 2000000
                 for i in range(0, total_points, BATCH):
@@ -187,7 +189,7 @@ class PointCloudAIEngine:
                         _, idx, _ = kdtree.search_knn_vector_3d(points[j], 1)
                         final_predictions[j] = pcd_down_labels[idx[0]]
             else:
-                print(f"小点云直接映射标签，完成！")
+                logger.debug("小点云直接映射标签完成")
                 final_predictions = pcd_down_labels
 
             # === 6. 保存与计算指标 ===

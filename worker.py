@@ -1,11 +1,13 @@
 # worker.py
-import os
+import logging
 import time
 from celery import Celery
 from sqlmodel import Session
 from database import engine 
 from services import crud_history
 from services.ai_engine import ai_engine
+
+logger = logging.getLogger(__name__)
 
 celery_app = Celery(
     "ai_tasks",
@@ -58,6 +60,6 @@ def run_ai_segmentation_task(
             "metrics": metrics
         }
         
-    except Exception as e:
-        print(f" [Celery Worker] 发生致命错误: {str(e)}")
-        raise e
+    except Exception:
+        logger.exception("Celery Worker 任务失败")
+        raise
