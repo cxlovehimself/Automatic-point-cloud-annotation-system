@@ -1,11 +1,73 @@
-import os
+import sys
+import types
 
 import pytest
-from fastapi import HTTPException
 
-os.environ.setdefault("DB_URL", "sqlite:///./test.db")
 
-from routers import dataset, task
+def _install_runtime_stubs():
+    fastapi = types.ModuleType("fastapi")
+
+    class HTTPException(Exception):
+        def __init__(self, status_code, detail=None, headers=None):
+            super().__init__(detail)
+            self.status_code = status_code
+            self.detail = detail
+            self.headers = headers
+
+    class APIRouter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def post(self, *args, **kwargs):
+            return lambda fn: fn
+
+        def get(self, *args, **kwargs):
+            return lambda fn: fn
+
+        def delete(self, *args, **kwargs):
+            return lambda fn: fn
+
+    def depends(value=None):
+        return value
+
+    fastapi.APIRouter = APIRouter
+    fastapi.Depends = depends
+    fastapi.File = depends
+    fastapi.Form = depends
+    fastapi.HTTPException = HTTPException
+    fastapi.Request = type("Request", (), {})
+    fastapi.UploadFile = type("UploadFile", (), {})
+    sys.modules["fastapi"] = fastapi
+
+    models = types.ModuleType("models")
+    models.SaveDatasetRequest = type("SaveDatasetRequest", (), {})
+    sys.modules["models"] = models
+
+    dependencies = types.ModuleType("dependencies")
+    dependencies.get_current_user = lambda: None
+    dependencies.get_db = lambda: None
+    sys.modules["dependencies"] = dependencies
+
+    sqlmodel = types.ModuleType("sqlmodel")
+    sqlmodel.Session = type("Session", (), {})
+    sys.modules["sqlmodel"] = sqlmodel
+
+    worker = types.ModuleType("worker")
+    worker.celery_app = object()
+    worker.run_ai_segmentation_task = type("TaskRunner", (), {"delay": lambda self, **kwargs: None})()
+    sys.modules["worker"] = worker
+
+    celery = types.ModuleType("celery")
+    celery_result = types.ModuleType("celery.result")
+    celery_result.AsyncResult = type("AsyncResult", (), {})
+    sys.modules["celery"] = celery
+    sys.modules["celery.result"] = celery_result
+
+    return HTTPException
+
+
+HTTPException = _install_runtime_stubs()
+from routers import dataset, task  # noqa: E402
 
 
 @pytest.mark.parametrize("value", ["", ".", "..", "../evil", "a/b", "/tmp/evil"])
