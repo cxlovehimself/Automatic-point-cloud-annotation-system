@@ -57,7 +57,8 @@ def run_ai_segmentation_task(
             "result_url": result_url,
             "scene_type": actual_scene,
             "total_process_time_sec": total_time,
-            "metrics": metrics
+            "metrics": metrics,
+            "_owner_user_id": user_id,
         }
         
     except Exception:

@@ -4,6 +4,7 @@ from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, R
 from sqlmodel import Session
 import uuid
 from datetime import datetime
+from typing import Any, Dict, Optional
 from response import success_response, error_response
 from dependencies import get_db, get_current_user
 from worker import run_ai_segmentation_task, celery_app
@@ -15,6 +16,35 @@ router = APIRouter(prefix="/api/task", tags=["点云处理模块"])
 
 UPLOAD_DIR = "data/uploads"
 OUTPUT_DIR = "data/outputs"
+_TASK_OWNERS: Dict[str, int] = {}
+
+
+def _remember_task_owner(task_id: str, user_id: int) -> None:
+    _TASK_OWNERS[task_id] = user_id
+
+
+def _result_owner_id(task_result: Any) -> Optional[int]:
+    result = task_result.result
+    if isinstance(result, dict):
+        return result.get("_owner_user_id")
+    return None
+
+
+def _ensure_task_owner(task_id: str, task_result, user_id: int) -> None:
+    owner_id = _TASK_OWNERS.get(task_id)
+    if owner_id is None and task_result.state == "SUCCESS":
+        owner_id = _result_owner_id(task_result)
+    if owner_id != user_id:
+        raise HTTPException(status_code=404, detail="任务不存在或无权查看")
+
+
+def _public_task_result(task_result: Any) -> Any:
+    result = task_result.result
+    if isinstance(result, dict):
+        public_result = result.copy()
+        public_result.pop("_owner_user_id", None)
+        return public_result
+    return result
 
 @router.post("/predict")
 async def predict_pointcloud(
@@ -72,6 +102,7 @@ async def predict_pointcloud(
         safe_filename=safe_filename,
         result_url=result_url
     )
+    _remember_task_owner(task.id, current_user.id)
 
     return success_response(
         message="文件已上传，已成功加入 AI 算力集群排队队列！",
@@ -84,8 +115,9 @@ async def predict_pointcloud(
 
 # 查询 Celery 任务进度
 @router.get("/status/{task_id}")
-def get_task_status(task_id: str):
+def get_task_status(task_id: str, current_user=Depends(get_current_user)):
     task_result = AsyncResult(task_id, app=celery_app)
+    _ensure_task_owner(task_id, task_result, current_user.id)
     
     if task_result.state == 'PENDING':
         return success_response(data={"status": "pending"}, message="前方拥挤，正在排队等待分配算力...")
@@ -100,7 +132,7 @@ def get_task_status(task_id: str):
             message="点云分析完成！",
             data={
                 "status": "success",
-                "result": task_result.result 
+                "result": _public_task_result(task_result)
             }
         )
         
