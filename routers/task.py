@@ -48,20 +48,20 @@ def _public_task_result(task_result: Any) -> Any:
 
 @router.post("/predict")
 async def predict_pointcloud(
-    request: Request, 
+    request: Request,
     file: UploadFile = File(...),
     scene_type: str = Form("auto"),
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user) 
+    current_user = Depends(get_current_user)
 ):
     # 非会员：注册超过 14 天则禁止处理
     if not current_user.is_subscribed:
-        register_date = current_user.register_time 
+        register_date = current_user.register_time
         if register_date:
             days_used = (datetime.now() - register_date).days
             if days_used > 14:
                 raise HTTPException(
-                    status_code=403, 
+                    status_code=403,
                     detail="您的 14 天免费试用期已结束，请前往个人中心升级 Pro 账户！"
                 )
 
@@ -69,12 +69,12 @@ async def predict_pointcloud(
         raise HTTPException(status_code=400, detail="不支持的 scene_type")
 
     safe_filename = os.path.basename(file.filename)
-    time_str = datetime.now().strftime("%Y%m%d_%H%M%S") 
-    short_uuid = uuid.uuid4().hex[:8] 
-    
+    time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    short_uuid = uuid.uuid4().hex[:8]
+
     input_filename = f"input_{time_str}_{short_uuid}_{safe_filename}"
     output_filename = f"result_{time_str}_{short_uuid}.ply"
-    
+
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -118,13 +118,13 @@ async def predict_pointcloud(
 def get_task_status(task_id: str, current_user=Depends(get_current_user)):
     task_result = AsyncResult(task_id, app=celery_app)
     _ensure_task_owner(task_id, task_result, current_user.id)
-    
+
     if task_result.state == 'PENDING':
         return success_response(data={"status": "pending"}, message="前方拥挤，正在排队等待分配算力...")
-        
+
     elif task_result.state == 'STARTED':
         return success_response(data={"status": "processing"}, message="AI 正在疯狂燃烧 GPU 运算中...")
-        
+
     elif task_result.state == 'SUCCESS':
         # 这里拿到的 result，就是 worker.py 最后那个 return 的字典！
         # 包含了你心心念念的 actual_scene, total_time, metrics 等！
@@ -135,9 +135,9 @@ def get_task_status(task_id: str, current_user=Depends(get_current_user)):
                 "result": _public_task_result(task_result)
             }
         )
-        
+
     elif task_result.state == 'FAILURE':
         return error_response(message=f"后台运算崩溃: {str(task_result.info)}")
-        
+
     else:
         return success_response(data={"status": task_result.state})
