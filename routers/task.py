@@ -84,7 +84,7 @@ async def predict_pointcloud(
 
 # 查询 Celery 任务进度
 @router.get("/status/{task_id}")
-def get_task_status(task_id: str):
+def get_task_status(task_id: str, current_user=Depends(get_current_user)):
     task_result = AsyncResult(task_id, app=celery_app)
     
     if task_result.state == 'PENDING':
@@ -94,18 +94,21 @@ def get_task_status(task_id: str):
         return success_response(data={"status": "processing"}, message="AI 正在疯狂燃烧 GPU 运算中...")
         
     elif task_result.state == 'SUCCESS':
-        # 这里拿到的 result，就是 worker.py 最后那个 return 的字典！
-        # 包含了你心心念念的 actual_scene, total_time, metrics 等！
+        result = task_result.result
+        if not isinstance(result, dict) or result.get("user_id") != current_user.id:
+            raise HTTPException(status_code=404, detail="任务不存在或无权访问")
+
+        response_result = {key: value for key, value in result.items() if key != "user_id"}
         return success_response(
             message="点云分析完成！",
             data={
                 "status": "success",
-                "result": task_result.result 
+                "result": response_result
             }
         )
         
     elif task_result.state == 'FAILURE':
-        return error_response(message=f"后台运算崩溃: {str(task_result.info)}")
+        return error_response(message="后台运算崩溃")
         
     else:
         return success_response(data={"status": task_result.state})
