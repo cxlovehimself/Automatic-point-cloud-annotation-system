@@ -24,11 +24,12 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 @router.post("/login")
 def login(user: UserLogin, db: Session = Depends(get_db)):
     db_user = crud_user.get_user_by_email(db, email=user.email)
-    expire_str = db_user.vip_expire_time.strftime("%Y-%m-%d") if db_user.vip_expire_time else None
-    register_str = db_user.register_time.isoformat() if db_user.register_time else None
 
     if not db_user or not security.verify_password(user.password, db_user.password_hash):
         raise HTTPException(status_code=401, detail="邮箱或密码错误")
+
+    expire_str = db_user.vip_expire_time.strftime("%Y-%m-%d") if db_user.vip_expire_time else None
+    register_str = db_user.register_time.isoformat() if db_user.register_time else None
 
     crud_user.update_last_login(db, db_user=db_user)
 
@@ -55,11 +56,12 @@ def get_current_user_info(
     current_user_email: str = Depends(security.get_current_user_email),
 ):
     db_user = crud_user.get_user_by_email(db, email=current_user_email)
-    expire_str = db_user.vip_expire_time.strftime("%Y-%m-%d") if db_user.vip_expire_time else None
-    register_str = db_user.register_time.isoformat() if db_user.register_time else None
 
     if not db_user:
         raise HTTPException(status_code=404, detail="用户不存在")
+
+    expire_str = db_user.vip_expire_time.strftime("%Y-%m-%d") if db_user.vip_expire_time else None
+    register_str = db_user.register_time.isoformat() if db_user.register_time else None
 
     return success_response(
         message="同步成功",

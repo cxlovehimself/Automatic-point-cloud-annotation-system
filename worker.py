@@ -54,6 +54,7 @@ def run_ai_segmentation_task(
         
         # 3. 返回最终结果给 Redis 柜子，前端此时就能取到了！
         return {
+            "user_id": user_id,
             "result_url": result_url,
             "scene_type": actual_scene,
             "total_process_time_sec": total_time,
