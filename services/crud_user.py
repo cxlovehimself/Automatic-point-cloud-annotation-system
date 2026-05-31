@@ -1,8 +1,36 @@
 # services/crud_user.py
 from sqlmodel import Session, select
 from datetime import datetime
+from typing import Optional
 import models
 import security
+
+
+def is_subscription_active(db_user: models.User, now: Optional[datetime] = None) -> bool:
+    """Return whether a user has an unexpired subscription."""
+    if not db_user.is_subscribed:
+        return False
+
+    current_time = now or datetime.now()
+    if db_user.vip_expire_time and db_user.vip_expire_time <= current_time:
+        return False
+
+    return True
+
+
+def refresh_subscription_status(
+    db: Session,
+    db_user: models.User,
+    now: Optional[datetime] = None,
+) -> models.User:
+    """Persistently clear stale subscription flags once the VIP period expires."""
+    if db_user.is_subscribed and not is_subscription_active(db_user, now=now):
+        db_user.is_subscribed = False
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
+
+    return db_user
 
 
 def get_user_by_email(db: Session, email: str):
