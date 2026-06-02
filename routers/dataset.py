@@ -42,14 +42,13 @@ async def save_annotated_dataset(
     current_user=Depends(get_current_user),
 ):
     storage_root = Path(STORAGE_PATH).resolve()
-    storage_root.mkdir(parents=True, exist_ok=True)
-
     task_id = _validate_path_component(req.task_id, "task_id")
     cloud_names = [
         _validate_path_component(cloud.cloud_name, "cloud_name")
         for cloud in req.data
     ]
     try:
+        storage_root.mkdir(parents=True, exist_ok=True)
         folder_name = f"{task_id}_{int(time.time())}"
         save_dir = _safe_child_path(storage_root, folder_name)
         save_dir.mkdir()
