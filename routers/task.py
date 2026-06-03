@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime
 from response import success_response, error_response
 from dependencies import get_db, get_current_user
+from services.subscription import has_active_subscription
 from worker import run_ai_segmentation_task, celery_app
 from celery.result import AsyncResult
 
@@ -25,7 +26,7 @@ async def predict_pointcloud(
     current_user = Depends(get_current_user) 
 ):
     # 非会员：注册超过 14 天则禁止处理
-    if not current_user.is_subscribed:
+    if not has_active_subscription(current_user):
         register_date = current_user.register_time 
         if register_date:
             days_used = (datetime.now() - register_date).days

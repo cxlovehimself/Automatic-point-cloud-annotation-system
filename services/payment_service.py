@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from sqlmodel import Session, select
 
 from models import Order, User
+from services.payment_config import get_alipay_notify_url
 
 load_dotenv()
 
@@ -48,16 +49,14 @@ alipay = AliPay(
 
 
 def _build_notify_url(base_url: str = "") -> str:
-    """优先使用公网请求域名，避免隧道域名变化后回调仍打到旧地址。"""
-    clean_base_url = (base_url or "").strip().rstrip("/")
-    if clean_base_url.startswith("https://") and "localhost" not in clean_base_url and "127.0.0.1" not in clean_base_url:
-        return f"{clean_base_url}/api/payment/callback"
-    return NOTIFY_URL
+    """支付宝异步回调地址必须来自服务端配置，不能信任请求 Host。"""
+    return get_alipay_notify_url(NOTIFY_URL)
 
 
 def create_payment_order(db: Session, user_id: int, amount: str = "9.90", base_url: str = "") -> tuple:
     random_str = uuid.uuid4().hex[:6]
     out_trade_no = f"ORDER_{int(time.time())}_{user_id}_{random_str}"
+    notify_url = _build_notify_url(base_url)
 
     new_order = Order(
         user_id=user_id,
@@ -68,7 +67,6 @@ def create_payment_order(db: Session, user_id: int, amount: str = "9.90", base_u
     db.add(new_order)
     db.commit()
     db.refresh(new_order)
-    notify_url = _build_notify_url(base_url)
     order_string = alipay.api_alipay_trade_page_pay(
         out_trade_no=out_trade_no,
         total_amount=amount,
