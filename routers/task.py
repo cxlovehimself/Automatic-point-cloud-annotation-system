@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime
 from response import success_response, error_response
 from dependencies import get_db, get_current_user
+from services.subscription_access import can_predict_pointcloud
 from worker import run_ai_segmentation_task, celery_app
 from celery.result import AsyncResult
 
@@ -24,16 +25,11 @@ async def predict_pointcloud(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user) 
 ):
-    # 非会员：注册超过 14 天则禁止处理
-    if not current_user.is_subscribed:
-        register_date = current_user.register_time 
-        if register_date:
-            days_used = (datetime.now() - register_date).days
-            if days_used > 14:
-                raise HTTPException(
-                    status_code=403, 
-                    detail="您的 14 天免费试用期已结束，请前往个人中心升级 Pro 账户！"
-                )
+    if not can_predict_pointcloud(current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="您的 14 天免费试用期已结束，请前往个人中心升级 Pro 账户！",
+        )
 
     if scene_type not in ["indoor", "outdoor", "auto"]:
         raise HTTPException(status_code=400, detail="不支持的 scene_type")
