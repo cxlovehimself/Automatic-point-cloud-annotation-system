@@ -1,11 +1,12 @@
 import logging
 import os
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, Request
-from sqlmodel import Session
+from sqlmodel import Session, select
 import uuid
 from datetime import datetime
 from response import success_response, error_response
 from dependencies import get_db, get_current_user
+from models import ProcessingTask
 from worker import run_ai_segmentation_task, celery_app
 from celery.result import AsyncResult
 
@@ -16,22 +17,28 @@ router = APIRouter(prefix="/api/task", tags=["点云处理模块"])
 UPLOAD_DIR = "data/uploads"
 OUTPUT_DIR = "data/outputs"
 
+
+def _has_active_subscription(user) -> bool:
+    if not user.is_subscribed or not user.vip_expire_time:
+        return False
+    return user.vip_expire_time >= datetime.now()
+
 @router.post("/predict")
 async def predict_pointcloud(
-    request: Request, 
+    request: Request,
     file: UploadFile = File(...),
     scene_type: str = Form("auto"),
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user) 
+    current_user = Depends(get_current_user)
 ):
     # 非会员：注册超过 14 天则禁止处理
-    if not current_user.is_subscribed:
-        register_date = current_user.register_time 
+    if not _has_active_subscription(current_user):
+        register_date = current_user.register_time
         if register_date:
             days_used = (datetime.now() - register_date).days
             if days_used > 14:
                 raise HTTPException(
-                    status_code=403, 
+                    status_code=403,
                     detail="您的 14 天免费试用期已结束，请前往个人中心升级 Pro 账户！"
                 )
 
@@ -39,12 +46,12 @@ async def predict_pointcloud(
         raise HTTPException(status_code=400, detail="不支持的 scene_type")
 
     safe_filename = os.path.basename(file.filename)
-    time_str = datetime.now().strftime("%Y%m%d_%H%M%S") 
-    short_uuid = uuid.uuid4().hex[:8] 
-    
+    time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    short_uuid = uuid.uuid4().hex[:8]
+
     input_filename = f"input_{time_str}_{short_uuid}_{safe_filename}"
     output_filename = f"result_{time_str}_{short_uuid}.ply"
-    
+
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -64,14 +71,28 @@ async def predict_pointcloud(
     base_url = str(request.base_url).rstrip('/')
     result_url = f"{base_url}/api/models/{output_filename}"
 
-    task = run_ai_segmentation_task.delay(
-        input_path=input_path,
-        output_path=output_path,
-        scene_type=scene_type,
-        user_id=current_user.id,
-        safe_filename=safe_filename,
-        result_url=result_url
-    )
+    task_id = uuid.uuid4().hex
+    task_record = ProcessingTask(task_id=task_id, user_id=current_user.id)
+    db.add(task_record)
+    db.commit()
+
+    try:
+        task = run_ai_segmentation_task.apply_async(
+            kwargs={
+                "input_path": input_path,
+                "output_path": output_path,
+                "scene_type": scene_type,
+                "user_id": current_user.id,
+                "safe_filename": safe_filename,
+                "result_url": result_url,
+            },
+            task_id=task_id,
+        )
+    except Exception as e:
+        db.delete(task_record)
+        db.commit()
+        logger.exception("AI 任务入队失败")
+        raise HTTPException(status_code=500, detail=f"任务入队失败: {str(e)}")
 
     return success_response(
         message="文件已上传，已成功加入 AI 算力集群排队队列！",
@@ -84,15 +105,27 @@ async def predict_pointcloud(
 
 # 查询 Celery 任务进度
 @router.get("/status/{task_id}")
-def get_task_status(task_id: str):
+def get_task_status(
+    task_id: str,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    statement = select(ProcessingTask).where(
+        ProcessingTask.task_id == task_id,
+        ProcessingTask.user_id == current_user.id,
+    )
+    task_record = db.exec(statement).first()
+    if not task_record:
+        raise HTTPException(status_code=404, detail="任务不存在或无权查看")
+
     task_result = AsyncResult(task_id, app=celery_app)
-    
+
     if task_result.state == 'PENDING':
         return success_response(data={"status": "pending"}, message="前方拥挤，正在排队等待分配算力...")
-        
+
     elif task_result.state == 'STARTED':
         return success_response(data={"status": "processing"}, message="AI 正在疯狂燃烧 GPU 运算中...")
-        
+
     elif task_result.state == 'SUCCESS':
         # 这里拿到的 result，就是 worker.py 最后那个 return 的字典！
         # 包含了你心心念念的 actual_scene, total_time, metrics 等！
@@ -100,12 +133,12 @@ def get_task_status(task_id: str):
             message="点云分析完成！",
             data={
                 "status": "success",
-                "result": task_result.result 
+                "result": task_result.result
             }
         )
-        
+
     elif task_result.state == 'FAILURE':
         return error_response(message=f"后台运算崩溃: {str(task_result.info)}")
-        
+
     else:
         return success_response(data={"status": task_result.state})

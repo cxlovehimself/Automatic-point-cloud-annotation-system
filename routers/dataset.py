@@ -1,8 +1,10 @@
 # routers/dataset.py
 from fastapi import APIRouter, Depends, HTTPException
 import os
-import json
+import re
 import time
+from pathlib import Path
+from dependencies import get_current_user
 from models import SaveDatasetRequest
 from response import success_response
 
@@ -12,17 +14,32 @@ STORAGE_PATH = "./storage/datasets"
 if not os.path.exists(STORAGE_PATH):
     os.makedirs(STORAGE_PATH)
 
+SAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def _safe_path_component(value: str, default: str) -> str:
+    raw_name = str(value or "").replace("\\", "/")
+    basename = os.path.basename(raw_name).strip()
+    safe_name = SAFE_COMPONENT_RE.sub("_", basename).strip("._")
+    return safe_name or default
+
 
 @router.post("/save")
-async def save_annotated_dataset(req: SaveDatasetRequest):
+async def save_annotated_dataset(
+    req: SaveDatasetRequest,
+    _current_user=Depends(get_current_user),
+):
     try:
-        folder_name = f"{req.task_id}_{int(time.time())}"
-        save_dir = os.path.join(STORAGE_PATH, folder_name)
-        os.makedirs(save_dir)
+        storage_root = Path(STORAGE_PATH).resolve()
+        folder_name = f"{_safe_path_component(req.task_id, 'task')}_{int(time.time())}"
+        save_dir = storage_root / folder_name
+        save_dir.mkdir(parents=True, exist_ok=False)
 
         for cloud in req.data:
-            label_filename = f"{cloud.cloud_name}_labels.txt"
-            file_path = os.path.join(save_dir, label_filename)
+            label_filename = f"{_safe_path_component(cloud.cloud_name, 'cloud')}_labels.txt"
+            file_path = (save_dir / label_filename).resolve()
+            if os.path.commonpath([str(save_dir), str(file_path)]) != str(save_dir):
+                raise HTTPException(status_code=400, detail="非法文件名")
 
             with open(file_path, "w") as f:
                 for p in cloud.points_data:
@@ -30,8 +47,10 @@ async def save_annotated_dataset(req: SaveDatasetRequest):
 
         return success_response(
             message="数据集云端保存成功！",
-            data={"path": save_dir},
+            data={"path": str(save_dir)},
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"保存失败: {str(e)}")
