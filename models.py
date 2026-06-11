@@ -12,20 +12,20 @@ class UserBase(SQLModel):
     """用户基础字段，供 DB 和 Schema 共享"""
     # 完美继承你原来 Schema 里的 EmailStr 校验，同时在数据库加索引和唯一约束
     email: EmailStr = Field(sa_column=Column(String(120), unique=True, index=True, nullable=False))
-    
+
 class User(SQLModel, table=True):
     """真实数据库表：users"""
     __tablename__ = "users"
-    
+
     id: Optional[int] = Field(default=None, primary_key=True, index=True)
     email: str = Field(sa_column=Column(String(255), nullable=False, unique=True, index=True))
     password_hash: str = Field(sa_column=Column(String(255), nullable=False))
     role: str = Field(default="normal", sa_column=Column(String(20), default="normal"))
     is_subscribed: bool = Field(default=False)
-    
+
     # VIP 到期时间 (允许为空)
     vip_expire_time: Optional[datetime] = Field(default=None)
-    
+
     register_time: datetime = Field(default_factory=datetime.utcnow)
     last_login: Optional[datetime] = Field(default=None)
 
@@ -54,13 +54,22 @@ class ProcessingHistoryBase(SQLModel):
 class ProcessingHistory(ProcessingHistoryBase, table=True):
     """真实数据库表：processing_history"""
     __tablename__ = "processing_history"
-    
+
     id: Optional[int] = Field(default=None, primary_key=True, index=True, description="记录唯一ID")
     # 外键：严格保留了你原来的 CASCADE 级联删除特性
     user_id: int = Field(foreign_key="users.id", ondelete="CASCADE", description="关联的用户ID")
     created_at: datetime = Field(default_factory=datetime.utcnow, description="任务完成时间")
 
     user: Optional[User] = Relationship(back_populates="histories")
+
+class ProcessingTask(SQLModel, table=True):
+    """记录 Celery 任务归属，避免任务状态和结果被跨用户读取。"""
+    __tablename__ = "processing_tasks"
+
+    id: Optional[int] = Field(default=None, primary_key=True, index=True)
+    task_id: str = Field(sa_column=Column(String(100), unique=True, index=True, nullable=False))
+    user_id: int = Field(foreign_key="users.id", ondelete="CASCADE")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
 # 返回给前端的 Schema (历史记录列表)
 class HistoryResponse(ProcessingHistoryBase):
@@ -82,13 +91,13 @@ class OrderBase(SQLModel):
 class Order(OrderBase, table=True):
     """真实数据库表：orders"""
     __tablename__ = "orders"
-    
+
     id: Optional[int] = Field(default=None, primary_key=True, index=True, description="订单自增ID")
     user_id: int = Field(foreign_key="users.id", ondelete="CASCADE", description="购买者ID")
     created_at: datetime = Field(default_factory=datetime.utcnow, description="创建时间")
-    
+
     updated_at: datetime = Field(
-        default_factory=datetime.utcnow, 
+        default_factory=datetime.utcnow,
         sa_column=Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment="更新时间")
     )
 
