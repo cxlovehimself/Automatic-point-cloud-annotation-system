@@ -35,13 +35,16 @@ async def save_annotated_dataset(req: SaveDatasetRequest, current_user=Depends(g
     try:
         storage_root = STORAGE_PATH.resolve()
         task_id = _safe_path_component(req.task_id, "task_id")
+        cloud_names = [
+            _safe_path_component(cloud.cloud_name, "cloud_name")
+            for cloud in req.data
+        ]
         folder_name = f"{task_id}_{int(time.time())}"
         save_dir = (storage_root / folder_name).resolve()
         _ensure_under_storage(save_dir, storage_root)
         save_dir.mkdir(parents=True, exist_ok=False)
 
-        for cloud in req.data:
-            cloud_name = _safe_path_component(cloud.cloud_name, "cloud_name")
+        for cloud, cloud_name in zip(req.data, cloud_names):
             label_filename = f"{cloud_name}_labels.txt"
             file_path = (save_dir / label_filename).resolve()
             _ensure_under_storage(file_path, storage_root)
