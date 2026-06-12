@@ -1,3 +1,4 @@
+import os
 from fastapi import Depends, HTTPException,status
 from passlib.context import CryptContext
 import jwt
@@ -5,7 +6,19 @@ from datetime import datetime, timedelta
 from fastapi.security import OAuth2PasswordBearer
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-SECRET_KEY = "your_super_secret_key_for_graduation_project"
+DEFAULT_INSECURE_SECRET_KEY = "your_super_secret_key_for_graduation_project"
+
+
+def _load_secret_key() -> str:
+    secret_key = (os.getenv("JWT_SECRET_KEY") or os.getenv("SECRET_KEY") or "").strip()
+    if not secret_key or secret_key == DEFAULT_INSECURE_SECRET_KEY:
+        raise RuntimeError("JWT_SECRET_KEY must be configured with a non-default signing secret")
+    if len(secret_key) < 32:
+        raise RuntimeError("JWT_SECRET_KEY must be at least 32 characters long")
+    return secret_key
+
+
+SECRET_KEY = _load_secret_key()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # Token 有效期 7 天
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")

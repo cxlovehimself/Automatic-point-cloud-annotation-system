@@ -4,6 +4,7 @@ from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, R
 from sqlmodel import Session
 import uuid
 from datetime import datetime
+from typing import Optional
 from response import success_response, error_response
 from dependencies import get_db, get_current_user
 from worker import run_ai_segmentation_task, celery_app
@@ -16,6 +17,13 @@ router = APIRouter(prefix="/api/task", tags=["点云处理模块"])
 UPLOAD_DIR = "data/uploads"
 OUTPUT_DIR = "data/outputs"
 
+
+def _has_active_subscription(user, now: Optional[datetime] = None) -> bool:
+    if not user.is_subscribed or not user.vip_expire_time:
+        return False
+    now = now or datetime.utcnow()
+    return user.vip_expire_time >= now
+
 @router.post("/predict")
 async def predict_pointcloud(
     request: Request, 
@@ -25,10 +33,10 @@ async def predict_pointcloud(
     current_user = Depends(get_current_user) 
 ):
     # 非会员：注册超过 14 天则禁止处理
-    if not current_user.is_subscribed:
+    if not _has_active_subscription(current_user):
         register_date = current_user.register_time 
         if register_date:
-            days_used = (datetime.now() - register_date).days
+            days_used = (datetime.utcnow() - register_date).days
             if days_used > 14:
                 raise HTTPException(
                     status_code=403, 
@@ -84,7 +92,7 @@ async def predict_pointcloud(
 
 # 查询 Celery 任务进度
 @router.get("/status/{task_id}")
-def get_task_status(task_id: str):
+def get_task_status(task_id: str, current_user=Depends(get_current_user)):
     task_result = AsyncResult(task_id, app=celery_app)
     
     if task_result.state == 'PENDING':
