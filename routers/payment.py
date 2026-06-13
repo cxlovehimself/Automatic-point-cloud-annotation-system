@@ -1,4 +1,3 @@
-# routers/payment.py
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from sqlmodel import Session, select
 
@@ -13,17 +12,14 @@ router = APIRouter(prefix="/api/payment", tags=["支付模块"])
 
 @router.post("/create")
 def create_payment(
-    request: Request,
     user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """获取支付链接，并创建本地订单"""
-    base_url = str(request.base_url).rstrip("/")
     pay_url, out_trade_no = payment_service.create_payment_order(
         db=db,
         user_id=user.id,
         amount="9.90",
-        base_url=base_url,
     )
 
     return success_response(
