@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -61,6 +62,7 @@ app.include_router(history.router)
 app.include_router(payment.router)
 app.include_router(dataset.router)
 # 挂载静态文件，让前端能下载处理好的模型
+Path("data/outputs").mkdir(parents=True, exist_ok=True)
 app.mount("/api/models", StaticFiles(directory="data/outputs"), name="models")
 
 @app.get("/")
