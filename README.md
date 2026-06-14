@@ -153,9 +153,12 @@ pip install fastapi uvicorn sqlmodel sqlalchemy pymysql python-dotenv "pydantic[
 
 ```env
 DB_URL=mysql+pymysql://用户名:密码@主机:端口/数据库名?charset=utf8mb4
+JWT_SECRET_KEY=至少32位的随机JWT签名密钥
 ALIPAY_APP_ID=你的支付宝应用ID
 ALIPAY_RETURN_URL=支付完成后的同步跳转地址
 ALIPAY_NOTIFY_URL=支付宝异步回调地址
+ALIPAY_SELLER_ID=支付宝商户ID（可选，配置后回调会校验）
+ALIPAY_SELLER_EMAIL=支付宝商户邮箱（可选，配置后回调会校验）
 ```
 
 2. 启动 Redis：

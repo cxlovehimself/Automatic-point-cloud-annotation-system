@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +16,8 @@ from services.ai_engine import ai_engine
 from database import init_db
 
 logger = logging.getLogger(__name__)
+OUTPUT_DIR = "data/outputs"
+UPLOAD_DIR = "data/uploads"
 
 
 # 定义 FastAPI 生命周期 (随服务器启动加载模型)
@@ -61,7 +64,9 @@ app.include_router(history.router)
 app.include_router(payment.router)
 app.include_router(dataset.router)
 # 挂载静态文件，让前端能下载处理好的模型
-app.mount("/api/models", StaticFiles(directory="data/outputs"), name="models")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+app.mount("/api/models", StaticFiles(directory=OUTPUT_DIR), name="models")
 
 @app.get("/")
 def read_root():

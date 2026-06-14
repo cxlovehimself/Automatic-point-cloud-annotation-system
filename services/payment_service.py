@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 APP_ID = (os.getenv("ALIPAY_APP_ID") or "").strip()
 RETURN_URL = (os.getenv("ALIPAY_RETURN_URL") or "").strip()
 NOTIFY_URL = (os.getenv("ALIPAY_NOTIFY_URL") or "").strip()
+SELLER_ID = (os.getenv("ALIPAY_SELLER_ID") or "").strip()
+SELLER_EMAIL = (os.getenv("ALIPAY_SELLER_EMAIL") or "").strip()
 
 # 从项目根目录下的 certs 读取支付宝密钥
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -48,14 +50,30 @@ alipay = AliPay(
 
 
 def _build_notify_url(base_url: str = "") -> str:
-    """优先使用公网请求域名，避免隧道域名变化后回调仍打到旧地址。"""
-    clean_base_url = (base_url or "").strip().rstrip("/")
-    if clean_base_url.startswith("https://") and "localhost" not in clean_base_url and "127.0.0.1" not in clean_base_url:
-        return f"{clean_base_url}/api/payment/callback"
+    """Return the configured Alipay callback URL without trusting request hosts."""
+    if not NOTIFY_URL:
+        raise RuntimeError("ALIPAY_NOTIFY_URL 未配置，无法创建支付回调地址")
     return NOTIFY_URL
 
 
+def _callback_identity_matches(data: dict) -> bool:
+    if not APP_ID:
+        logger.error("ALIPAY_APP_ID 未配置，拒绝处理支付宝回调")
+        return False
+    if data.get("app_id") != APP_ID:
+        logger.warning("支付宝回调 app_id 不匹配: %s", data.get("app_id"))
+        return False
+    if SELLER_ID and data.get("seller_id") != SELLER_ID:
+        logger.warning("支付宝回调 seller_id 不匹配: %s", data.get("seller_id"))
+        return False
+    if SELLER_EMAIL and data.get("seller_email") != SELLER_EMAIL:
+        logger.warning("支付宝回调 seller_email 不匹配: %s", data.get("seller_email"))
+        return False
+    return True
+
+
 def create_payment_order(db: Session, user_id: int, amount: str = "9.90", base_url: str = "") -> tuple:
+    notify_url = _build_notify_url(base_url)
     random_str = uuid.uuid4().hex[:6]
     out_trade_no = f"ORDER_{int(time.time())}_{user_id}_{random_str}"
 
@@ -68,7 +86,6 @@ def create_payment_order(db: Session, user_id: int, amount: str = "9.90", base_u
     db.add(new_order)
     db.commit()
     db.refresh(new_order)
-    notify_url = _build_notify_url(base_url)
     order_string = alipay.api_alipay_trade_page_pay(
         out_trade_no=out_trade_no,
         total_amount=amount,
@@ -85,6 +102,9 @@ def process_callback(db: Session, data: dict) -> Tuple[bool, Optional[Tuple[str,
     signature = data.pop("sign", None)
     if not alipay.verify(data, signature):
         logger.warning("支付宝回调验签失败")
+        return False, None
+
+    if not _callback_identity_matches(data):
         return False, None
 
     if data.get("trade_status") in ("TRADE_SUCCESS", "TRADE_FINISHED"):
