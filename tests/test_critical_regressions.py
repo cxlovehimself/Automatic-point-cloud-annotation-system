@@ -40,7 +40,7 @@ def test_dataset_save_route_requires_authenticated_user(monkeypatch):
     dataset = importlib.import_module("routers.dataset")
     from dependencies import get_current_user
 
-    route = next(route for route in dataset.router.routes if route.path == "/save")
+    route = next(route for route in dataset.router.routes if route.path == "/api/dataset/save")
 
     assert any(dependency.call is get_current_user for dependency in route.dependant.dependencies)
 
