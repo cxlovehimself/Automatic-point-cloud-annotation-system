@@ -1,14 +1,23 @@
-from fastapi import Depends, HTTPException,status
+from datetime import datetime, timedelta
+
+import os
+
+from dotenv import load_dotenv
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
 import jwt
-from datetime import datetime, timedelta
-from fastapi.security import OAuth2PasswordBearer
+
+load_dotenv()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-SECRET_KEY = "your_super_secret_key_for_graduation_project"
+DEFAULT_SECRET_KEY = "your_super_secret_key_for_graduation_project"
+SECRET_KEY = (os.getenv("JWT_SECRET_KEY") or "").strip()
+if not SECRET_KEY or SECRET_KEY == DEFAULT_SECRET_KEY or len(SECRET_KEY) < 32:
+    raise RuntimeError("JWT_SECRET_KEY must be set to a private value of at least 32 characters")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # Token 有效期 7 天
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
