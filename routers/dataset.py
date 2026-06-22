@@ -1,28 +1,42 @@
 # routers/dataset.py
 from fastapi import APIRouter, Depends, HTTPException
-import os
-import json
+from pathlib import Path
 import time
+
+from dependencies import get_current_user
 from models import SaveDatasetRequest
 from response import success_response
 
 router = APIRouter(prefix="/api/dataset", tags=["数据集管理"])
 
-STORAGE_PATH = "./storage/datasets"
-if not os.path.exists(STORAGE_PATH):
-    os.makedirs(STORAGE_PATH)
+STORAGE_PATH = Path("storage/datasets")
+STORAGE_PATH.mkdir(parents=True, exist_ok=True)
+
+
+def _safe_path_component(value: str, field_name: str) -> str:
+    value = str(value).strip()
+    if not value or "\x00" in value or "/" in value or "\\" in value:
+        raise HTTPException(status_code=400, detail=f"{field_name} 包含非法路径字符")
+
+    candidate = Path(value)
+    if candidate.is_absolute() or value in {".", ".."} or len(candidate.parts) != 1:
+        raise HTTPException(status_code=400, detail=f"{field_name} 包含非法路径字符")
+
+    return value
 
 
 @router.post("/save")
-async def save_annotated_dataset(req: SaveDatasetRequest):
+async def save_annotated_dataset(req: SaveDatasetRequest, user=Depends(get_current_user)):
     try:
-        folder_name = f"{req.task_id}_{int(time.time())}"
-        save_dir = os.path.join(STORAGE_PATH, folder_name)
-        os.makedirs(save_dir)
+        safe_task_id = _safe_path_component(req.task_id, "task_id")
+        folder_name = f"{safe_task_id}_{int(time.time())}"
+        save_dir = STORAGE_PATH / folder_name
+        save_dir.mkdir(parents=True, exist_ok=False)
 
         for cloud in req.data:
-            label_filename = f"{cloud.cloud_name}_labels.txt"
-            file_path = os.path.join(save_dir, label_filename)
+            safe_cloud_name = _safe_path_component(cloud.cloud_name, "cloud_name")
+            label_filename = f"{safe_cloud_name}_labels.txt"
+            file_path = save_dir / label_filename
 
             with open(file_path, "w") as f:
                 for p in cloud.points_data:
@@ -30,8 +44,10 @@ async def save_annotated_dataset(req: SaveDatasetRequest):
 
         return success_response(
             message="数据集云端保存成功！",
-            data={"path": save_dir},
+            data={"path": str(save_dir)},
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"保存失败: {str(e)}")
